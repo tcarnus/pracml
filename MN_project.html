@@ -1,0 +1,87 @@
+<h1 id="practical-machine-learning-project---weight-lifting">Practical Machine Learning Project - Weight Lifting</h1>
+<h2 id="introduction">Introduction</h2>
+<p>This report outlines the development of a model which will be used to predict the way that a weight lifting exercise is performed based on personal sensor data.</p>
+<h3 id="background">Background</h3>
+<p>Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).</p>
+<p>The goal of this project is to predict the manner in which a group of 6 participants performed the exercise, captured by the <code>classe</code> variable in the training set.</p>
+<p>This report describes: - data - the model building process - the model validation process - a short discussion</p>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="co">#modelling</span>
+<span class="kw">library</span>(caret)
+<span class="kw">library</span>(pROC)</code></pre>
+<h2 id="data">Data</h2>
+<p>The data for this project come from the following source: (http://groupware.les.inf.puc-rio.br/har). The training and test data for this project were directly downloaded from the following locations:</p>
+<pre class="sourceCode r"><code class="sourceCode r">wtrain &lt;-<span class="st"> </span><span class="kw">read.csv</span>(<span class="st">&#39;https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv&#39;</span>, <span class="dt">header =</span> <span class="ot">TRUE</span>, <span class="dt">na.strings=</span><span class="kw">c</span>(<span class="st">&quot;NA&quot;</span>, <span class="st">&quot;&quot;</span>))
+wtest &lt;-<span class="st"> </span><span class="kw">read.csv</span>(<span class="st">&#39;https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv&#39;</span>, <span class="dt">header =</span> <span class="ot">TRUE</span>, <span class="dt">na.strings=</span><span class="kw">c</span>(<span class="st">&quot;NA&quot;</span>, <span class="st">&quot;&quot;</span>))</code></pre>
+<h3 id="tidy-data-set">Tidy data set</h3>
+<p>Lets look at the data set:</p>
+<p>We note a number of variables unsuitable for predictive model as they stand, including a number of large number of missing values, metadata variables (id, username) and some near-zero-variance predictors. Let us remove them:</p>
+<ul>
+<li>Large numbers of missing values are not useful for predictor vairables, therefore we remve al variables that have one or more issing values.</li>
+<li>Some of the variables are metadata (ie they give information on the subjects, the structure of the data and the sequence of events). These variable do not contain useful information for predicting the target variable.</li>
+</ul>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="co"># discard NAs</span>
+NAfeats &lt;-<span class="st"> </span><span class="kw">sapply</span>(wtrain, function(x) {<span class="kw">sum</span>(<span class="kw">is.na</span>(x))}) 
+wtrain &lt;-<span class="st"> </span>wtrain[,<span class="kw">which</span>(NAfeats ==<span class="st"> </span><span class="dv">0</span>)]
+<span class="co"># remove metadata variables</span>
+INDmeta &lt;-<span class="st"> </span><span class="kw">grep</span>(<span class="st">&quot;timestamp|X|user_name|new_window|num_window&quot;</span>, <span class="kw">names</span>(wtrain))
+wtrain &lt;-<span class="st"> </span>wtrain[,-INDmeta]</code></pre>
+<h3 id="correlations">Correlations</h3>
+<p>Correlation amongst predictors can be an issue for some machine learning algorithms and could lead to subptimal model fitting and predictions. Lets look at the correlation between predictor variables so that we may get an understanding of the data we are dealing with.</p>
+<pre class="sourceCode r"><code class="sourceCode r">datype &lt;-<span class="st"> </span><span class="kw">sapply</span>(wtrain, class)
+numcor &lt;-<span class="st"> </span><span class="kw">cor</span>(wtrain[,datype ==<span class="st"> &#39;numeric&#39;</span>], <span class="dt">use =</span> <span class="st">&#39;pairwise.complete.obs&#39;</span>)</code></pre>
+<pre><code>## Error: &#39;x&#39; is empty</code></pre>
+<pre class="sourceCode r"><code class="sourceCode r">highCorr &lt;-<span class="st"> </span><span class="kw">findCorrelation</span>(numcor, <span class="fl">0.80</span>)
+numcor[highCorr,highCorr]</code></pre>
+<pre><code>##                   yaw_belt gyros_forearm_z gyros_dumbbell_x gyros_arm_y
+## yaw_belt          1.000000        0.073252         0.001599   -0.215525
+## gyros_forearm_z   0.073252        1.000000        -0.914476   -0.008836
+## gyros_dumbbell_x  0.001599       -0.914476         1.000000    0.015733
+## gyros_arm_y      -0.215525       -0.008836         0.015733    1.000000</code></pre>
+<p>We only identify 2 variables with strong correlation between them. This is unlikely to cause an issue and so we keep all data.</p>
+<h3 id="training-and-testing-sets">Training and testing sets</h3>
+<p>We take a 60% training set to train our model and keep a 40% set for assesing out of sample predictive accuracy.</p>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="kw">set.seed</span>(<span class="dv">123</span>)
+<span class="co"># make training set</span>
+INDtrain &lt;-<span class="st"> </span><span class="kw">createDataPartition</span>(<span class="dt">y =</span> wtrain$classe, <span class="dt">p =</span> <span class="fl">0.6</span>, <span class="dt">list=</span><span class="ot">FALSE</span>)</code></pre>
+<pre><code>## Error: y must have at least 2 data points</code></pre>
+<pre class="sourceCode r"><code class="sourceCode r">Dtrain &lt;-<span class="st"> </span>wtrain[INDtrain,]
+Dtest &lt;-<span class="st"> </span>wtrain[-INDtrain,]</code></pre>
+<h1 id="model-building">Model building</h1>
+<p>We use the Caret package for building a predictive model for the <code>classe</code> variable from sensor data. For all models we use k-fold cross-validation to tune the model, setting <code>k = 4</code> as a sensible value allowing for computation speed and accuracy.</p>
+<p>We will look at three modelling approaches, beginning with a simple decision tree, fit using the CART algorithm.</p>
+<pre class="sourceCode r"><code class="sourceCode r">dt1 &lt;-<span class="st"> </span><span class="kw">train</span>(classe ~<span class="st"> </span>., <span class="dt">data =</span> Dtrain, <span class="dt">method =</span> <span class="st">&#39;rpart&#39;</span>,
+             <span class="dt">trControl =</span> <span class="kw">trainControl</span>(<span class="dt">method =</span> <span class="st">&#39;cv&#39;</span>, <span class="dt">number =</span> <span class="dv">4</span>))</code></pre>
+<pre><code>## Error: &#39;.&#39; in formula and no &#39;data&#39; argument</code></pre>
+<p>Testing the accurrcay of this mode on the testing set shows that this model does not give us very good acuracy:</p>
+<pre class="sourceCode r"><code class="sourceCode r">testPred &lt;-<span class="st"> </span><span class="kw">predict</span>(dt1, Dtest)</code></pre>
+<pre><code>## Error: object &#39;roll_belt&#39; not found</code></pre>
+<pre class="sourceCode r"><code class="sourceCode r">dt_acc &lt;-<span class="st"> </span><span class="kw">postResample</span>(testPred, Dtest$classe)</code></pre>
+<pre><code>## Error: all arguments must have the same length</code></pre>
+<p>Accuracy for a simple decision tree is 50.7%.</p>
+<p>A slightly more involved algorithm for a classification predicitve model is the Support Vector Machine:</p>
+<pre class="sourceCode r"><code class="sourceCode r">svm1 &lt;-<span class="st"> </span><span class="kw">train</span>(classe ~<span class="st"> </span>., <span class="dt">data =</span> Dtrain, 
+             <span class="dt">method =</span> <span class="st">&#39;svmRadial&#39;</span>,
+             <span class="dt">trControl =</span> <span class="kw">trainControl</span>(<span class="dt">method =</span> <span class="st">&quot;cv&quot;</span>, <span class="dt">number =</span> <span class="dv">4</span>),
+             <span class="dt">allowParallel=</span>T)</code></pre>
+<p>Does this model provide better accuracy than the simple decision tree? testing how this model performs is straightforward, predicting the outcomes on the test data set:</p>
+<pre class="sourceCode r"><code class="sourceCode r">testPredsvm &lt;-<span class="st"> </span><span class="kw">predict</span>(svm1, Dtest)
+svm_acc &lt;-<span class="st"> </span><span class="kw">postResample</span>(testPredsvm, Dtest$classe)</code></pre>
+<p>The SVM model performs significantly better, with an accuracy of 92.4%.</p>
+<p>Can this be improved by using a random forest of trees?</p>
+<pre class="sourceCode r"><code class="sourceCode r">rf1 &lt;-<span class="st"> </span><span class="kw">train</span>(classe ~<span class="st"> </span>., <span class="dt">data =</span> Dtrain, 
+             <span class="dt">method =</span> <span class="st">&#39;rf&#39;</span>,
+             <span class="dt">trControl =</span> <span class="kw">trainControl</span>(<span class="dt">method =</span> <span class="st">&quot;cv&quot;</span>, <span class="dt">number =</span> <span class="dv">4</span>),
+             <span class="dt">allowParallel=</span>T)</code></pre>
+<p>Using the test data to look at predictive ability of the model:</p>
+<pre class="sourceCode r"><code class="sourceCode r">testPredrf &lt;-<span class="st"> </span><span class="kw">predict</span>(rf1, Dtest)</code></pre>
+<pre><code>## Error: object &#39;roll_belt&#39; not found</code></pre>
+<pre class="sourceCode r"><code class="sourceCode r">rf_acc &lt;-<span class="st"> </span><span class="kw">postResample</span>(testPredrf, Dtest$classe)</code></pre>
+<pre><code>## Error: all arguments must have the same length</code></pre>
+<p>shows that accuracy is further improved by 6.8% to 99.2%.</p>
+<h2 id="out-of-sample-error">Out of sample error</h2>
+<p>The out of sample error is calculated simply by substracting the cross-validation derived accuracy value from 1: We expect out of sample error for the random forest model to be 0.83%.</p>
+<h1 id="test-cases">Test cases</h1>
+<p>We now use our best model to predict the class for 20 different cases.</p>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="kw">predict</span>(rf1, wtest)</code></pre>
+<pre><code>##  [1] B A B A A E D B A A B C B A E E A B B B
+## Levels: A B C D E</code></pre>
